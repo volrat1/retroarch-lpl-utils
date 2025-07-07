@@ -8,3 +8,6 @@ __pycache__/
 
 # Archivos de configuración de VSCode
 .vscode/
+
+# playlists
+.lpl
