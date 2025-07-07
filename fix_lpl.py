@@ -5,6 +5,7 @@ import json
 from rapidfuzz import process, fuzz
 from urllib.parse import unquote
 import re
+import os
 
 # --- Utilidades ---
 
@@ -53,8 +54,10 @@ def main(playlist_path, url_index, threshold):
     items = playlist.get('items', [])
 
     used_labels = set()
-    accepted_matches = []  # (original, match, score)
+    accepted_matches = []  # (original, match, score, adjusted_score)
     no_match = []          # (original, best_candidate, score)
+
+    log_lines = []
 
     for item in items:
         original_label = item.get('label', '')
@@ -76,19 +79,18 @@ def main(playlist_path, url_index, threshold):
 
             for match_lc, score, _ in matches:
                 best_match = thumbnail_lookup[match_lc]
-
-                # Penalización por diferencia de longitud
                 length_penalty = abs(len(best_match) - len(cleaned_label)) * 0.5
                 adjusted_score = score - length_penalty
-
                 allow_duplicate = score >= 95
 
                 if adjusted_score >= threshold and (best_match not in used_labels or allow_duplicate):
                     item['label'] = best_match
                     if not allow_duplicate:
                         used_labels.add(best_match)
-                    accepted_matches.append((original_label, best_match, score))
-                    print(f'Label "{original_label}" -> "{best_match}" (score {score}, ajustado {adjusted_score:.1f})')
+                    accepted_matches.append((original_label, best_match, score, adjusted_score))
+                    line = f'Label "{original_label}" -> "{best_match}" (score {score}, ajustado {adjusted_score:.1f})'
+                    print(line)
+                    log_lines.append(line)
                     match_found = True
                     break
 
@@ -99,23 +101,41 @@ def main(playlist_path, url_index, threshold):
             best_try = matches[0] if matches else ("", 0, None)
             best_candidate_name = thumbnail_lookup.get(best_try[0], "?")
             no_match.append((original_label, best_candidate_name, best_try[1] if matches else 0))
-            print(f'Label "{original_label}" no tuvo buen match aceptable')
+            line = f'Label "{original_label}" no tuvo buen match aceptable'
+            print(line)
+            log_lines.append(line)
 
-    save_playlist(playlist, playlist_path.replace('.lpl', '_fixed.lpl'))
+    fixed_path = playlist_path.replace('.lpl', '_fixed.lpl')
+    save_playlist(playlist, fixed_path)
 
+    # Agregar resumen final
     if accepted_matches:
         print("\n=== Matches con menor score aceptado ===")
-        for orig, match, score in sorted(accepted_matches, key=lambda x: x[2])[:20]:
-            print(f'"{orig}" -> "{match}" (score {score})')
+        log_lines.append("\n=== Matches con menor score aceptado ===")
+        for orig, match, score, _ in sorted(accepted_matches, key=lambda x: x[2])[:20]:
+            line = f'"{orig}" -> "{match}" (score {score})'
+            print(line)
+            log_lines.append(line)
 
     if no_match:
         print("\n=== Casos sin match aceptable ===")
+        log_lines.append("\n=== Casos sin match aceptable ===")
         for orig, best, score in no_match:
-            print(f'"{orig}" (mejor candidato: "{best}", score {score})')
+            line = f'"{orig}" (mejor candidato: "{best}", score {score})'
+            print(line)
+            log_lines.append(line)
+
+    # Guardar log
+    log_path = playlist_path.replace('.lpl', '_log.txt')
+    with open(log_path, 'w', encoding='utf-8') as log_file:
+        log_file.write('\n'.join(log_lines))
+
+    print(f"\n🎉 Playlist guardada como: {fixed_path}")
+    print(f"📄 Log guardado como: {log_path}")
 
 if __name__ == '__main__':
     if len(sys.argv) < 3 or len(sys.argv) > 4:
-        print("Usage: python fix_labels.py playlist_path.lpl url_index [threshold]")
+        print("Uso: python fix_labels.py playlist_path.lpl url_index [threshold]")
         sys.exit(1)
 
     playlist_path = sys.argv[1]
