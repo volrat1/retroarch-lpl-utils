@@ -3,7 +3,6 @@
 # source venv/bin/activate
 # pip install requests beautifulsoup4 rapidfuzz
 
-
 import sys
 import requests
 from bs4 import BeautifulSoup
@@ -40,8 +39,12 @@ def clean_label(label):
 
 def main(playlist_path, url_index, threshold):
     thumbnail_names = get_names_from_url(url_index)
-    playlist = load_playlist(playlist_path)
 
+    # Crear diccionario original → lowercased, para mapear luego al nombre exacto
+    thumbnail_lookup = {name.lower(): name for name in thumbnail_names}
+    thumbnail_keys = list(thumbnail_lookup.keys())
+
+    playlist = load_playlist(playlist_path)
     items = playlist.get('items', [])
 
     for item in items:
@@ -49,14 +52,15 @@ def main(playlist_path, url_index, threshold):
         if not original_label:
             continue
 
-        cleaned_label = clean_label(original_label)
+        cleaned_label = clean_label(original_label).lower()
 
-        best_match, score, _ = process.extractOne(cleaned_label, thumbnail_names, scorer=fuzz.ratio)
+        best_key, score, _ = process.extractOne(cleaned_label, thumbnail_keys, scorer=fuzz.ratio)
         if score >= threshold:
+            best_match = thumbnail_lookup[best_key]
             item['label'] = best_match
             print(f'Label "{original_label}" -> "{best_match}" (score {score})')
         else:
-            print(f'Label "{original_label}" had no good match (best: "{best_match}" score {score})')
+            print(f'Label "{original_label}" had no good match (best: "{thumbnail_lookup[best_key]}" score {score})')
 
     save_playlist(playlist, playlist_path.replace('.lpl', '_fixed.lpl'))
 
