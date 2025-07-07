@@ -23,13 +23,10 @@ def arabic_to_roman(text):
 def clean_label(label):
     return re.sub(r"[\(\[].*?[\)\]]", "", label).strip()
 
-# --- Funciones principales ---
-
 def get_names_from_url(url):
     r = requests.get(url)
     r.raise_for_status()
     soup = BeautifulSoup(r.text, 'html.parser')
-
     names = []
     for a in soup.find_all('a', href=True):
         href = a['href']
@@ -79,11 +76,19 @@ def main(playlist_path, url_index, threshold):
 
             for match_lc, score, _ in matches:
                 best_match = thumbnail_lookup[match_lc]
-                if score >= threshold and best_match not in used_labels:
+
+                # Penalización por diferencia de longitud
+                length_penalty = abs(len(best_match) - len(cleaned_label)) * 0.5
+                adjusted_score = score - length_penalty
+
+                allow_duplicate = score >= 95
+
+                if adjusted_score >= threshold and (best_match not in used_labels or allow_duplicate):
                     item['label'] = best_match
-                    used_labels.add(best_match)
+                    if not allow_duplicate:
+                        used_labels.add(best_match)
                     accepted_matches.append((original_label, best_match, score))
-                    print(f'Label "{original_label}" -> "{best_match}" (score {score})')
+                    print(f'Label "{original_label}" -> "{best_match}" (score {score}, ajustado {adjusted_score:.1f})')
                     match_found = True
                     break
 
