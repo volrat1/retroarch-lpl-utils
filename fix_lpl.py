@@ -1,8 +1,3 @@
-# Requires a venv with requests, beautifulsoup4, and rapidfuzz installed
-# python3 -m venv venv
-# source venv/bin/activate
-# pip install requests beautifulsoup4 rapidfuzz
-
 import sys
 import requests
 from bs4 import BeautifulSoup
@@ -10,6 +5,28 @@ import json
 from rapidfuzz import process, fuzz
 from urllib.parse import unquote
 import re
+
+# --- Utilidades ---
+
+ROMAN_MAP = {
+    1: 'I', 2: 'II', 3: 'III', 4: 'IV', 5: 'V', 6: 'VI',
+    7: 'VII', 8: 'VIII', 9: 'IX', 10: 'X', 11: 'XI', 12: 'XII',
+    13: 'XIII', 14: 'XIV', 15: 'XV', 16: 'XVI', 17: 'XVII', 18: 'XVIII', 19: 'XIX', 20: 'XX'
+}
+
+def arabic_to_roman(text):
+    """Convierte números arábigos (1-20) a romanos en un string, si existen."""
+    def replace(match):
+        num = int(match.group())
+        return ROMAN_MAP.get(num, match.group())  # Si no está en el rango, devuelve igual
+
+    return re.sub(r'\b([1-9]|1[0-9]|20)\b', replace, text)
+
+def clean_label(label):
+    """Elimina paréntesis, corchetes y su contenido, y espacios sobrantes."""
+    return re.sub(r"[\(\[].*?[\)\]]", "", label).strip()
+
+# --- Funciones principales ---
 
 def get_names_from_url(url):
     r = requests.get(url)
@@ -33,34 +50,51 @@ def save_playlist(data, path):
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
-def clean_label(label):
-    # Remove content inside parentheses or brackets, including the parentheses/brackets
-    return re.sub(r"[\(\[].*?[\)\]]", "", label).strip()
-
 def main(playlist_path, url_index, threshold):
     thumbnail_names = get_names_from_url(url_index)
 
-    # Crear diccionario original → lowercased, para mapear luego al nombre exacto
+    # Crear diccionario: lowercase → original
     thumbnail_lookup = {name.lower(): name for name in thumbnail_names}
     thumbnail_keys = list(thumbnail_lookup.keys())
 
     playlist = load_playlist(playlist_path)
     items = playlist.get('items', [])
 
+    used_labels = set()
+
     for item in items:
         original_label = item.get('label', '')
         if not original_label:
             continue
 
-        cleaned_label = clean_label(original_label).lower()
+        cleaned_label = clean_label(original_label)
+        search_variants = [cleaned_label]
 
-        best_key, score, _ = process.extractOne(cleaned_label, thumbnail_keys, scorer=fuzz.ratio)
-        if score >= threshold:
-            best_match = thumbnail_lookup[best_key]
-            item['label'] = best_match
-            print(f'Label "{original_label}" -> "{best_match}" (score {score})')
-        else:
-            print(f'Label "{original_label}" had no good match (best: "{thumbnail_lookup[best_key]}" score {score})')
+        # Añadir versión con números romanos si hay dígitos
+        if re.search(r'\b[1-9]\b|\b1[0-9]\b|\b20\b', cleaned_label):
+            roman_label = arabic_to_roman(cleaned_label)
+            if roman_label != cleaned_label:
+                search_variants.insert(0, roman_label)  # priorizar versión romana
+
+        match_found = False
+        for variant in search_variants:
+            variant_lc = variant.lower()
+            matches = process.extract(variant_lc, thumbnail_keys, scorer=fuzz.ratio, limit=5)
+
+            for match_lc, score, _ in matches:
+                best_match = thumbnail_lookup[match_lc]
+                if score >= threshold and best_match not in used_labels:
+                    item['label'] = best_match
+                    used_labels.add(best_match)
+                    print(f'Label "{original_label}" -> "{best_match}" (score {score})')
+                    match_found = True
+                    break
+
+            if match_found:
+                break
+
+        if not match_found:
+            print(f'Label "{original_label}" no tuvo buen match aceptable')
 
     save_playlist(playlist, playlist_path.replace('.lpl', '_fixed.lpl'))
 
