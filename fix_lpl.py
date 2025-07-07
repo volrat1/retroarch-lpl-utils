@@ -15,15 +15,12 @@ ROMAN_MAP = {
 }
 
 def arabic_to_roman(text):
-    """Convierte números arábigos (1-20) a romanos en un string, si existen."""
     def replace(match):
         num = int(match.group())
-        return ROMAN_MAP.get(num, match.group())  # Si no está en el rango, devuelve igual
-
+        return ROMAN_MAP.get(num, match.group())
     return re.sub(r'\b([1-9]|1[0-9]|20)\b', replace, text)
 
 def clean_label(label):
-    """Elimina paréntesis, corchetes y su contenido, y espacios sobrantes."""
     return re.sub(r"[\(\[].*?[\)\]]", "", label).strip()
 
 # --- Funciones principales ---
@@ -37,8 +34,8 @@ def get_names_from_url(url):
     for a in soup.find_all('a', href=True):
         href = a['href']
         if href.lower().endswith('.png'):
-            name = href[:-4]  # remove ".png"
-            name = unquote(name)  # decode %20, etc.
+            name = href[:-4]
+            name = unquote(name)
             names.append(name)
     return names
 
@@ -52,8 +49,6 @@ def save_playlist(data, path):
 
 def main(playlist_path, url_index, threshold):
     thumbnail_names = get_names_from_url(url_index)
-
-    # Crear diccionario: lowercase → original
     thumbnail_lookup = {name.lower(): name for name in thumbnail_names}
     thumbnail_keys = list(thumbnail_lookup.keys())
 
@@ -61,6 +56,8 @@ def main(playlist_path, url_index, threshold):
     items = playlist.get('items', [])
 
     used_labels = set()
+    accepted_matches = []  # (original, match, score)
+    no_match = []          # (original, best_candidate, score)
 
     for item in items:
         original_label = item.get('label', '')
@@ -70,11 +67,10 @@ def main(playlist_path, url_index, threshold):
         cleaned_label = clean_label(original_label)
         search_variants = [cleaned_label]
 
-        # Añadir versión con números romanos si hay dígitos
         if re.search(r'\b[1-9]\b|\b1[0-9]\b|\b20\b', cleaned_label):
             roman_label = arabic_to_roman(cleaned_label)
             if roman_label != cleaned_label:
-                search_variants.insert(0, roman_label)  # priorizar versión romana
+                search_variants.insert(0, roman_label)
 
         match_found = False
         for variant in search_variants:
@@ -86,6 +82,7 @@ def main(playlist_path, url_index, threshold):
                 if score >= threshold and best_match not in used_labels:
                     item['label'] = best_match
                     used_labels.add(best_match)
+                    accepted_matches.append((original_label, best_match, score))
                     print(f'Label "{original_label}" -> "{best_match}" (score {score})')
                     match_found = True
                     break
@@ -94,9 +91,22 @@ def main(playlist_path, url_index, threshold):
                 break
 
         if not match_found:
+            best_try = matches[0] if matches else ("", 0, None)
+            best_candidate_name = thumbnail_lookup.get(best_try[0], "?")
+            no_match.append((original_label, best_candidate_name, best_try[1] if matches else 0))
             print(f'Label "{original_label}" no tuvo buen match aceptable')
 
     save_playlist(playlist, playlist_path.replace('.lpl', '_fixed.lpl'))
+
+    if accepted_matches:
+        print("\n=== Matches con menor score aceptado ===")
+        for orig, match, score in sorted(accepted_matches, key=lambda x: x[2])[:20]:
+            print(f'"{orig}" -> "{match}" (score {score})')
+
+    if no_match:
+        print("\n=== Casos sin match aceptable ===")
+        for orig, best, score in no_match:
+            print(f'"{orig}" (mejor candidato: "{best}", score {score})')
 
 if __name__ == '__main__':
     if len(sys.argv) < 3 or len(sys.argv) > 4:
